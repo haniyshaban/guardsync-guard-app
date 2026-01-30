@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -9,6 +9,8 @@ import {
   Loader2,
   RefreshCw,
   Clock,
+  Map,
+  List,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -18,6 +20,7 @@ import { BottomNav } from '@/components/BottomNav';
 import { useAuth } from '@/contexts/AuthContext';
 import { useToast } from '@/hooks/use-toast';
 import { PatrolPoint, PatrolLog } from '@/types/guard';
+import PatrolMap from '@/components/PatrolMap';
 import {
   getCurrentPosition,
   checkPatrolPoint,
@@ -44,6 +47,14 @@ export default function PatrolMode() {
   const [selectedPoint, setSelectedPoint] = useState<PatrolPointStatus | null>(null);
   const [patrolLogs, setPatrolLogs] = useState<PatrolLog[]>([]);
   const [patrolStartTime, setPatrolStartTime] = useState<Date | null>(null);
+  const [viewMode, setViewMode] = useState<'map' | 'list'>('map');
+
+  // Determine the next point (first incomplete point by order)
+  const nextPoint = useMemo(() => {
+    return [...patrolPoints]
+      .sort((a, b) => a.order - b.order)
+      .find(p => !p.isCompleted);
+  }, [patrolPoints]);
 
   // Initialize patrol points with status
   useEffect(() => {
@@ -225,9 +236,29 @@ export default function PatrolMode() {
               Check-in at each patrol point
             </p>
           </div>
-          <Button variant="outline" size="icon" onClick={getLocation}>
-            <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
-          </Button>
+          <div className="flex items-center gap-2">
+            <div className="flex items-center bg-secondary rounded-lg p-1">
+              <Button
+                variant={viewMode === 'map' ? 'default' : 'ghost'}
+                size="sm"
+                className="h-8 px-3"
+                onClick={() => setViewMode('map')}
+              >
+                <Map className="w-4 h-4" />
+              </Button>
+              <Button
+                variant={viewMode === 'list' ? 'default' : 'ghost'}
+                size="sm"
+                className="h-8 px-3"
+                onClick={() => setViewMode('list')}
+              >
+                <List className="w-4 h-4" />
+              </Button>
+            </div>
+            <Button variant="outline" size="icon" onClick={getLocation}>
+              <RefreshCw className={`w-4 h-4 ${isLoading ? 'animate-spin' : ''}`} />
+            </Button>
+          </div>
         </div>
 
         {/* Progress Card */}
@@ -257,8 +288,50 @@ export default function PatrolMode() {
           </CardContent>
         </Card>
 
+        {/* Patrol Map */}
+        {viewMode === 'map' && !isLoading && patrolPoints.length > 0 && (
+          <div className="mb-6">
+            <PatrolMap
+              patrolPoints={patrolPoints}
+              currentPosition={currentPosition}
+              nextPointId={nextPoint?.id}
+            />
+            {nextPoint && (
+              <Card className="glass-card border-0 mt-3">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full bg-green-500/20 flex items-center justify-center animate-pulse">
+                        <span className="text-sm font-bold text-green-500">{nextPoint.order}</span>
+                      </div>
+                      <div>
+                        <p className="font-medium text-foreground">Next: {nextPoint.name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {nextPoint.distance !== undefined ? `${nextPoint.distance}m away` : 'Calculating...'}
+                        </p>
+                      </div>
+                    </div>
+                    <Button
+                      variant={nextPoint.distance && nextPoint.distance <= nextPoint.radiusMeters ? 'gradient' : 'outline'}
+                      size="sm"
+                      onClick={() => handleCheckIn(nextPoint)}
+                      disabled={isCheckingIn}
+                    >
+                      {isCheckingIn && selectedPoint?.id === nextPoint.id ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        'Check In'
+                      )}
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </div>
+        )}
+
         {/* Current Location */}
-        {currentPosition && (
+        {currentPosition && viewMode === 'list' && (
           <div className="glass-card p-3 mb-6 flex items-center gap-3">
             <div className="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center">
               <MapPin className="w-5 h-5 text-primary" />
@@ -276,102 +349,117 @@ export default function PatrolMode() {
         )}
 
         {/* Patrol Points List */}
-        <h2 className="text-lg font-semibold text-foreground mb-3">Patrol Points</h2>
-        <div className="space-y-3">
-          {isLoading ? (
-            <div className="glass-card p-8 text-center">
-              <Loader2 className="w-8 h-8 text-primary mx-auto animate-spin mb-3" />
-              <p className="text-muted-foreground">Getting your location...</p>
-            </div>
-          ) : (
-            sortedPoints.map((point) => (
-              <Card
-                key={point.id}
-                className={`glass-card border-0 transition-all ${
-                  point.isCompleted ? 'opacity-70' : ''
-                }`}
-              >
-                <CardContent className="p-4">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-start gap-3">
-                      <div
-                        className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                          point.isCompleted
-                            ? 'bg-accent/20'
-                            : point.distance && point.distance <= point.radiusMeters
-                            ? 'bg-primary/20'
-                            : 'bg-secondary'
-                        }`}
-                      >
-                        {point.isCompleted ? (
-                          <CheckCircle className="w-5 h-5 text-accent" />
-                        ) : (
-                          <span className="text-sm font-bold text-foreground">
-                            {point.order}
-                          </span>
-                        )}
-                      </div>
-                      <div>
-                        <p className="font-medium text-foreground">{point.name}</p>
-                        <div className="flex items-center gap-2 mt-1">
-                          {point.distance !== undefined && (
-                            <Badge
-                              variant={
-                                point.distance <= point.radiusMeters
-                                  ? 'default'
-                                  : 'secondary'
-                              }
-                              className={
-                                point.distance <= point.radiusMeters
-                                  ? 'bg-accent/20 text-accent'
-                                  : ''
-                              }
-                            >
-                              {point.distance}m away
-                            </Badge>
-                          )}
-                          {point.distance && point.distance <= point.radiusMeters && (
-                            <Badge
-                              variant="outline"
-                              className="border-accent text-accent"
-                            >
-                              In Range
-                            </Badge>
-                          )}
+        {viewMode === 'list' && (
+          <>
+            <h2 className="text-lg font-semibold text-foreground mb-3">Patrol Points</h2>
+            <div className="space-y-3">
+              {isLoading ? (
+                <div className="glass-card p-8 text-center">
+                  <Loader2 className="w-8 h-8 text-primary mx-auto animate-spin mb-3" />
+                  <p className="text-muted-foreground">Getting your location...</p>
+                </div>
+              ) : (
+                sortedPoints.map((point) => (
+                  <Card
+                    key={point.id}
+                    className={`glass-card border-0 transition-all ${
+                      point.isCompleted ? 'opacity-70' : ''
+                    } ${point.id === nextPoint?.id ? 'ring-2 ring-green-500/50' : ''}`}
+                  >
+                    <CardContent className="p-4">
+                      <div className="flex items-start justify-between">
+                        <div className="flex items-start gap-3">
+                          <div
+                            className={`w-10 h-10 rounded-full flex items-center justify-center ${
+                              point.isCompleted
+                                ? 'bg-accent/20'
+                                : point.id === nextPoint?.id
+                                ? 'bg-green-500/20 animate-pulse'
+                                : point.distance && point.distance <= point.radiusMeters
+                                ? 'bg-primary/20'
+                                : 'bg-secondary'
+                            }`}
+                          >
+                            {point.isCompleted ? (
+                              <CheckCircle className="w-5 h-5 text-accent" />
+                            ) : point.id === nextPoint?.id ? (
+                              <span className="text-sm font-bold text-green-500">
+                                {point.order}
+                              </span>
+                            ) : (
+                              <span className="text-sm font-bold text-foreground">
+                                {point.order}
+                              </span>
+                            )}
+                          </div>
+                          <div>
+                            <p className="font-medium text-foreground">{point.name}</p>
+                            {point.id === nextPoint?.id && !point.isCompleted && (
+                              <Badge variant="outline" className="border-green-500 text-green-500 mb-1">
+                                Next Point
+                              </Badge>
+                            )}
+                            <div className="flex items-center gap-2 mt-1">
+                              {point.distance !== undefined && (
+                                <Badge
+                                  variant={
+                                    point.distance <= point.radiusMeters
+                                      ? 'default'
+                                      : 'secondary'
+                                  }
+                                  className={
+                                    point.distance <= point.radiusMeters
+                                      ? 'bg-accent/20 text-accent'
+                                      : ''
+                                  }
+                                >
+                                  {point.distance}m away
+                                </Badge>
+                              )}
+                              {point.distance && point.distance <= point.radiusMeters && (
+                                <Badge
+                                  variant="outline"
+                                  className="border-accent text-accent"
+                                >
+                                  In Range
+                                </Badge>
+                              )}
+                            </div>
+                            {point.completedAt && (
+                              <p className="text-xs text-muted-foreground mt-1">
+                                Checked in at{' '}
+                                {new Date(point.completedAt).toLocaleTimeString()}
+                              </p>
+                            )}
+                          </div>
                         </div>
-                        {point.completedAt && (
-                          <p className="text-xs text-muted-foreground mt-1">
-                            Checked in at{' '}
-                            {new Date(point.completedAt).toLocaleTimeString()}
-                          </p>
+
+                        {!point.isCompleted && (
+                          <Button
+                            variant={
+                              point.distance && point.distance <= point.radiusMeters
+                                ? 'gradient'
+                                : 'outline'
+                            }
+                            size="sm"
+                            onClick={() => handleCheckIn(point)}
+                            disabled={isCheckingIn}
+                          >
+                            {isCheckingIn && selectedPoint?.id === point.id ? (
+                              <Loader2 className="w-4 h-4 animate-spin" />
+                            ) : (
+                              'Check In'
+                            )}
+                          </Button>
                         )}
                       </div>
-                    </div>
-
-                    {!point.isCompleted && (
-                      <Button
-                        variant={
-                          point.distance && point.distance <= point.radiusMeters
-                            ? 'gradient'
-                            : 'outline'
-                        }
-                        size="sm"
-                        onClick={() => handleCheckIn(point)}
-                        disabled={isCheckingIn}
-                      >
-                        {isCheckingIn && selectedPoint?.id === point.id ? (
-                          <Loader2 className="w-4 h-4 animate-spin" />
-                        ) : (
-                          'Check In'
-                        )}
-                      </Button>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            ))
-          )}
-        </div>
+                    </CardContent>
+                  </Card>
+                ))
+              )}
+            </div>
+          </>
+        )}
 
         {/* Completion Message */}
         {completedCount === totalCount && totalCount > 0 && (
